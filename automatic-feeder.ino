@@ -3,6 +3,7 @@ Servo servo; // cria o objeto servo
 String msg;//String para armazenar a mensagem recebida pela porta serial 3.
 int lastHour;
 int feedInterval;
+int feedQuantityTime;
  
 void setup() {
   servo.attach(2); //declara pino digital utilizado
@@ -10,13 +11,14 @@ void setup() {
   Serial.begin(115200);
   Serial3.begin(115200);
   servo.write(25);
-  feedInterval = 3;
+  feedInterval = 2;
+  feedQuantityTime = 100;
   lastHour = 99;
 }
 
 void feedNow(int hour){
   servo.write(200);
-  delay(100);
+  delay(feedQuantityTime);
   servo.write(25); 
   Serial.println("FEEDED");
   lastHour = hour;
@@ -32,7 +34,7 @@ void loop() {
     if(msg.indexOf('\n') > 0){
       Serial.print(msg);
       
-      if(msg.indexOf("TIME_") >= 0){
+      if(msg.indexOf("TIME=") >= 0){
         int newTime = msg.substring(5, 6).toInt();
         feedInterval = newTime;
         Serial.println("NEW TIME SET " + String(newTime));
@@ -42,6 +44,12 @@ void loop() {
         Serial.println("FEEDING NOW");
         int newHour = msg.substring(9, 11).toInt();
         feedNow(newHour);
+      }
+
+      else if(msg.indexOf("FEED_QUANTITY=") >= 0){
+        int newFeedQuantity = msg.substring(14, 17).toInt();
+        feedQuantityTime = newFeedQuantity;
+        Serial.println("NEW FEED QUANTITY " + String(newFeedQuantity));
       }
 
       else{
