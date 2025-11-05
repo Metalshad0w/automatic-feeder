@@ -1,104 +1,118 @@
-//MEGA2560 (V18.1 - Corrigido com START_HOUR e END_HOUR)
+//MEGA2560 (V19.0 - Refatorado para estabilidade de memória)
 #include <Servo.h>
-Servo servo; // cria o objeto servo
-String msg; // String para armazenar a mensagem recebida pela porta serial 3.
+#include <string.h> // Para strstr, atoi
 
-// --- Constantes de Hardware e Lógica ---
+Servo servo;
 const int servoPin = 13;
-const int START_HOUR = 7; // V18.1: Constante adicionada
-const int END_HOUR = 20;  // V18.1: Constante adicionada
+
+// --- Constantes de Lógica ---
+const int START_HOUR = 7; 
+const int END_HOUR = 20;  
+
+// --- V19.0: Buffer de Char para Serial (Remove String global) ---
+const int MSG_BUFFER_SIZE = 64;
+char serialBuffer[MSG_BUFFER_SIZE];
+int bufferIndex = 0;
 
 // --- Variáveis de Estado ---
+bool isInitialized = false; // V19.0: Substitui o "magic number" 99
 int lastHour;
 int feedInterval;
 int feedQuantityTime;
-int feedOpenning;
+int feedOpeningAngle; // V19.0: Typo corrigido
  
 void setup() {
-  servo.attach(servoPin); // declara pino digital utilizado
-  // Serial (Debug)
+  servo.attach(servoPin); 
   Serial.begin(115200);
-  // Serial3 (Comunicação com ESP8266)
   Serial3.begin(115200);
   
   servo.write(90);
   pinMode(servoPin, OUTPUT);
   feedInterval = 4;
   feedQuantityTime = 900;
-  lastHour = 99; // 99 indica que ainda não alimentou
-  feedOpenning = 0;
-
-  // V18.0: Envia o status inicial para o ESP
-  Serial3.println("INIT_HOUR=" + String(lastHour));
+  feedOpeningAngle = 0; 
+  
+  // Envia o status inicial para o ESP
   Serial3.println("INIT_INTERVAL=" + String(feedInterval));
   Serial3.println("INIT_QUANTITY=" + String(feedQuantityTime));
+  Serial3.println("INIT_HOUR=-1"); // Envia -1 (não inicializado)
 }
 
 void feedNow(int hour){
-  servo.write(feedOpenning);
-  delay(feedQuantityTime); // O delay aqui é aceitável, pois o Mega não tem outras tarefas críticas
+  servo.write(feedOpeningAngle);
+  delay(feedQuantityTime); 
   servo.write(90); 
   
   Serial.println("FEEDED"); // Debug local
   lastHour = hour;
+  isInitialized = true;
   
-  // V18.0: Envia a atualização de hora para o ESP
+  // Envia a atualização de hora para o ESP
   Serial3.println("LAST_HOUR=" + String(lastHour));
 }
- 
-void loop() {
-  // Aguarde dados vindos do ESP8266 (Serial3)
-  if (Serial3.available()) {
-    char data = Serial3.read();
-    msg += data;
-    if(msg.indexOf('\n') > 0){
-      Serial.print("ESP Disse: " + msg); // Debug local
-      
-      if(msg.indexOf("TIME=") >= 0){
-        int newTime = msg.substring(5, 7).toInt(); // Corrigido para 2 dígitos
+
+// V19.0: Nova função de parsing (mais rápida e sem "magic numbers")
+void parseCommand(char* command) {
+    Serial.print("ESP Disse: "); Serial.println(command); // Debug local
+    
+    char* valuePtr; // Ponteiro para o valor após o '='
+    
+    if ((valuePtr = strstr(command, "TIME="))) {
+        int newTime = atoi(valuePtr + 5); // Converte o número após "TIME="
         feedInterval = newTime;
         Serial.println("NEW TIME SET " + String(newTime));
-        Serial3.println("ACK_TIME=" + String(feedInterval)); // Envia confirmação
-      }
-
-      else if(msg.indexOf("FEED_NOW") >= 0){
+        Serial3.println("ACK_TIME=" + String(feedInterval)); 
+    }
+    else if ((valuePtr = strstr(command, "FEED_NOW="))) {
         Serial.println("FEEDING NOW");
-        int newHour = msg.substring(9, 11).toInt();
+        int newHour = atoi(valuePtr + 9);
         feedNow(newHour);
-        // feedNow() já envia o LAST_HOUR
-      }
-
-      else if(msg.indexOf("FEED_QUANTITY=") >= 0){
-        int newFeedQuantity = msg.substring(14, 18).toInt();
+    }
+    else if ((valuePtr = strstr(command, "FEED_QUANTITY="))) {
+        int newFeedQuantity = atoi(valuePtr + 14);
         feedQuantityTime = newFeedQuantity;
         Serial.println("NEW FEED QUANTITY " + String(newFeedQuantity));
-        Serial3.println("ACK_QUANTITY=" + String(feedQuantityTime)); // Envia confirmação
-      }
-
-      // Lógica de alimentação automática (baseada na hora enviada pelo ESP)
-      else{
-        int hour = msg.substring(0, 2).toInt();
+        Serial3.println("ACK_QUANTITY=" + String(feedQuantityTime));
+    }
+    else if ((valuePtr = strstr(command, "FEED_OPENNING="))) {
+        int newFeedOpenning = atoi(valuePtr + 14);
+        feedOpeningAngle = newFeedOpenning;
+        Serial.println("NEW FEED OPENNING " + String(newFeedOpenning));
+    }
+    else {
+        // Assume que é o comando de atualização de hora
+        int hour = atoi(command); 
         Serial.println("UPDATE HOUR: " + String(hour));
         Serial.println("LAST HOUR: " + String(lastHour));
 
-        if (lastHour >= 90){
+        if (!isInitialized){ // V19.0: Usa booleano
           Serial.println("SYSTEM STARTUP");
           lastHour = hour;
-          // Envia o LastHour inicializado para o ESP
+          isInitialized = true;
           Serial3.println("LAST_HOUR=" + String(lastHour));
         }
-
-        // V18.1: Agora usa as constantes START_HOUR e END_HOUR
         else if (hour <= END_HOUR && hour >= START_HOUR) { 
           if(abs(hour - lastHour) >= feedInterval){
             feedNow(hour);
-            // feedNow() já envia o LAST_HOUR
           }
         }
-      }
-      
-      msg = "";
     }
-    delay(50);
+}
+ 
+void loop() {
+  // V19.0: Leitura de Serial otimizada (sem classe String)
+  while (Serial3.available()) {
+    char data = Serial3.read();
+
+    if (data == '\n') { // Fim do comando
+      serialBuffer[bufferIndex] = '\0'; // Termina a string
+      parseCommand(serialBuffer);
+      bufferIndex = 0; // Reseta o buffer
+    } 
+    else if (bufferIndex < MSG_BUFFER_SIZE - 1) {
+      serialBuffer[bufferIndex] = data;
+      bufferIndex++;
+    }
+    // Ignora dados se o buffer estourar
   }
 }
