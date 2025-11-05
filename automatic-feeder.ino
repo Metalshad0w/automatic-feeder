@@ -1,25 +1,30 @@
+//MEGA2560
 #include <Servo.h>
 Servo servo; // cria o objeto servo
 String msg;//String para armazenar a mensagem recebida pela porta serial 3.
+const int servoPin = 13;
 int lastHour;
 int feedInterval;
 int feedQuantityTime;
+int feedOpenning;
  
 void setup() {
-  servo.attach(2); //declara pino digital utilizado
+  servo.attach(servoPin); //declara pino digital utilizado
   //Defina as porta serial para comunicação com ESP8266.
   Serial.begin(115200);
   Serial3.begin(115200);
-  servo.write(25);
-  feedInterval = 2;
-  feedQuantityTime = 100;
+  servo.write(90);
+  pinMode(servoPin, OUTPUT);
+  feedInterval = 4;
+  feedQuantityTime = 500;
   lastHour = 99;
+  feedOpenning = 0;
 }
 
 void feedNow(int hour){
-  servo.write(200);
+  servo.write(feedOpenning);
   delay(feedQuantityTime);
-  servo.write(25); 
+  servo.write(90); 
   Serial.println("FEEDED");
   lastHour = hour;
 }
@@ -47,9 +52,15 @@ void loop() {
       }
 
       else if(msg.indexOf("FEED_QUANTITY=") >= 0){
-        int newFeedQuantity = msg.substring(14, 17).toInt();
+        int newFeedQuantity = msg.substring(14, 18).toInt();
         feedQuantityTime = newFeedQuantity;
         Serial.println("NEW FEED QUANTITY " + String(newFeedQuantity));
+      }
+
+      else if(msg.indexOf("FEED_OPENNING=") >= 0){
+        int newFeedOpenning = msg.substring(14, 18).toInt();
+        feedOpenning = newFeedOpenning;
+        Serial.println("NEW FEED OPENNING " + String(newFeedOpenning));
       }
 
       else{
@@ -57,6 +68,7 @@ void loop() {
         Serial.println("UPDATE HOUR: " + String(hour));
         Serial.println("LAST HOUR: " + String(lastHour));
         Serial.println("FEED INTERVAL: " + String(feedInterval));
+        Serial.println("FEED OPENNING: " + String(feedOpenning));
 
         if (lastHour >= 90){
           Serial.println("SYSTEM STARTUP");
